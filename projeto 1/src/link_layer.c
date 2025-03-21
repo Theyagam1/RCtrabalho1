@@ -325,10 +325,99 @@ int llread(int fd, unsigned char *packet, int *sequenceN)
 ////////////////////////////////////////////////
 // LLCLOSE
 ////////////////////////////////////////////////
-int llclose(int showStatistics)
+int llclose(int fd, LinkLayer connectionParameters, int showStatistics)
 {
+    if(fd == -1){return -1;}
+    if(connectionParameters.role == LlTx){
+        unsigned char DISC[5] = {FLAG, A_SENDER, C_DISC, A_SENDER^C_DISC, FLAG};
+        unsigned char byteread;
+        State state = START;
+        int attempts = 0;
+        while (attempts < nrtries){
+            printf("Sending DISC...\n");
+            write(fd, DISC, 5);
+            alarm(timeout);
+            while(!alarmFlag && state != STOP){
+                int bytesRead = read(fd, &byteread, 1);
+                if(bytesRead > 0){
+                    switch(state){
+                        case START:
+                            if(byteread == FLAG) {state = FLAG_RCV;}
+                            break;
+                        case FLAG_RCV:
+                            if(byteread == A_RECEIVER) {state = A_RCV;}
+                            else state = START;
+                            break;
+                        case A_RCV:
+                            if(byteread == C_DISC) {state = C_RCV;}
+                            else state = START;
+                            break;
+                        case C_RCV:
+                            if(byteread == (A_RECEIVER^C_DISC)) {state = BCC_OK;}
+                            else state = START;
+                            break;
+                        case BCC_OK:
+                            if(byteread == FLAG) {state = STOP;}
+                            else state = START;
+                            break;
+                    }
+                }
+            }
+            alarm(0);
+            if(state == STOP){
+                printf("DISC acknowledged\n");
+                unsigned char UA[5] = {FLAG, A_SENDER, C_UA, A_SENDER^C_UA, FLAG};
+                write(fd, UA, 5);
+                close(fd);
+                return 1;
+            }
+            printf("Retrying DISC... (%d/%d)\n", attempts + 1, nrtries);
+            attempts++;
+            alarmFlag = 0;
+            state = START;
+            
+        }
+    }
     
-    // TODO
+    else if(connectionParameters.role == LlRx){
+        unsigned char DISC[5] = {FLAG, A_RECEIVER, C_DISC, A_RECEIVER^C_DISC, FLAG};
+        unsigned char byteread;
+        State state = START;
+        while(state != STOP){
+            int bytesRead = read(fd, &byteread, 1);
+            if(bytesRead > 0){
+                switch(state){
+                    case START:
+                        if(byteread == FLAG) {state = FLAG_RCV;}
+                        break;
+                    case FLAG_RCV:
+                        if(byteread == A_SENDER) {state = A_RCV;}
+                        else state = START;
+                        break;
+                    case A_RCV:
+                        if(byteread == C_DISC) {state = C_RCV;}
+                        else state = START;
+                        break;
+                    case C_RCV:
+                        if(byteread == (A_SENDER^C_DISC)) {state = BCC_OK;}
+                        else state = START;
+                        break;
+                    case BCC_OK:
+                        if(byteread == FLAG) {state = STOP;}
+                        else state = START;
+                        break;
+                }
+            }
+        }
+        if(state == STOP){
+            printf("DISC received\n");
+            unsigned char UA[5] = {FLAG, A_RECEIVER, C_DISC, A_RECEIVER^C_DISC, FLAG};
+            write(fd, UA, 5);
+            close(fd);
+            return 1;
+        }
+    }
+    
 
-    return 1;
+    return -1;
 }

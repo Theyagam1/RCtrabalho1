@@ -61,25 +61,25 @@ int llread(int fd, unsigned char *packet, int *sequenceN);
  * @param showStatistics Se TRUE, imprime estatísticas no console ao fechar.
  * @return Retorna "1" em caso de sucesso ou "-1" em caso de erro.
  */
-int llclose(int showStatistics);
+int llclose(int fd, LinkLayer connectionParameters, int showStatistics);
 
 /**
  * Perform byte stuffing on the input data.
  * @param input Input data.
- * @param inputSize Size of the input data.
+ * @param inputsize Size of the input data.
  * @param output Output buffer for stuffed data.
- * @param outputSize Size of the output data.
+ * @param outputsize Size of the output data.
  */
-void byteStuffing(unsigned char *input, int inputSize, unsigned char *output, int *outputSize);
+void byteStuffing(unsigned char *input, int *inputsize, unsigned char *output, int *outputsize);
 
 /**
  * Perform byte destuffing on the input data.
  * @param input Input data with stuffing.
- * @param inputSize Size of the input data.
+ * @param inputsize Size of the input data.
  * @param output Output buffer for destuffed data.
- * @param outputSize Size of the output data.
+ * @param outputsize Size of the output data.
  */
-void byteDeStuffing(unsigned char *input, int inputSize, unsigned char *output, int *outputSize);
+void byteDeStuffing(unsigned char *input, int *inputsize, unsigned char *output, int *outputsize);
 
 
 #endif // _LINK_LAYER_H_
