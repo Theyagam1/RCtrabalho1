@@ -27,21 +27,59 @@ typedef struct
 #define FALSE 0
 #define TRUE 1
 
-// Open a connection using the "port" parameters defined in struct linkLayer.
-// Return "1" on success or "-1" on error.
+/**
+ * Abre uma conexão usando os parâmetros definidos na estrutura LinkLayer.
+ * 
+ * @param connectionParameters Estrutura contendo os parâmetros da conexão.
+ * @return Retorna "1" em caso de sucesso ou "-1" em caso de erro.
+ */
 int llopen(LinkLayer connectionParameters);
 
-// Send data in buf with size bufSize.
-// Return number of chars written, or "-1" on error.
+/**
+ * Envia dados no buffer `buf` com tamanho `bufSize`.
+ * 
+ * @param fd Descritor de arquivo da conexão serial.
+ * @param buf Buffer contendo os dados a serem enviados.
+ * @param bufSize Tamanho do buffer (número de bytes a serem enviados).
+ * @param sequenceN Número de sequência do quadro (0 ou 1).
+ * @return Retorna o número de caracteres escritos ou "-1" em caso de erro.
+ */
 int llwrite(int fd, const unsigned char *buf, int bufSize, int sequenceN);
-
-// Receive data in packet.
-// Return number of chars read, or "-1" on error.
+/**
+ * Recebe dados no buffer `packet`.
+ * 
+ * @param fd Descritor de arquivo da conexão serial.
+ * @param packet Buffer onde os dados recebidos serão armazenados.
+ * @param sequenceN Ponteiro para o número de sequência esperado (0 ou 1).
+ * @return Retorna o número de caracteres lidos ou "-1" em caso de erro.
+ */
 int llread(int fd, unsigned char *packet, int *sequenceN);
 
-// Close previously opened connection.
-// if showStatistics == TRUE, link layer should print statistics in the console on close.
-// Return "1" on success or "-1" on error.
+/**
+ * Fecha a conexão previamente aberta.
+ * 
+ * @param showStatistics Se TRUE, imprime estatísticas no console ao fechar.
+ * @return Retorna "1" em caso de sucesso ou "-1" em caso de erro.
+ */
 int llclose(int showStatistics);
+
+/**
+ * Perform byte stuffing on the input data.
+ * @param input Input data.
+ * @param inputSize Size of the input data.
+ * @param output Output buffer for stuffed data.
+ * @param outputSize Size of the output data.
+ */
+void byteStuffing(unsigned char *input, int inputSize, unsigned char *output, int *outputSize);
+
+/**
+ * Perform byte destuffing on the input data.
+ * @param input Input data with stuffing.
+ * @param inputSize Size of the input data.
+ * @param output Output buffer for destuffed data.
+ * @param outputSize Size of the output data.
+ */
+void byteDeStuffing(unsigned char *input, int inputSize, unsigned char *output, int *outputSize);
+
 
 #endif // _LINK_LAYER_H_
