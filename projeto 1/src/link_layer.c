@@ -26,6 +26,8 @@ typedef enum { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK, STOP } State;
 #define C_REJ1 0x81
 #define C_I0 0x00
 #define C_I1 0x40
+#define ESC 0x7D
+#define STUFF 0x20
 #define MAX_PAYLOAD 1000
 
 
@@ -33,11 +35,43 @@ typedef enum { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK, STOP } State;
 // LLOPEN
 ////////////////////////////////////////////////
 int alarmFlag = 0;
+int nrtries;
+int timeout;
+
+void byteStuffing(unsigned char *input, int *inputsize, unsigned char *output, int *outputsize) {
+    *outputsize = 0;
+    for (int i = 0; i < *inputsize; i++) {
+        if (input[i] == FLAG || input[i] == ESC) {
+            output[(*outputsize)++] = ESC;
+            output[(*outputsize)++] = input[i] ^ STUFF;
+        } else {
+            output[(*outputsize)++] = input[i];
+        }
+    }
+}
+void byteDeStuffing(unsigned char *input, int *inputsize, unsigned char *output, int *outputsize) {
+    *outputsize = 0;
+    for (int i = 0; i < inputsize; i++) {
+        if (input[i] == ESC) {
+            i++;
+            if (input[i] == FLAG^STUFF) {
+                output[(*outputsize)++] = FLAG;
+            } 
+            else if (input[i] == ESC^STUFF) {
+                output[(*outputsize)++] = ESC;
+            }
+            output[(*outputsize)++] = input[i];
+        }
+        else {
+            output[(*outputsize)++] = input[i];
+        }
+    }
+}
+
 void alarmHandler(int signo) {
     alarmFlag = 1;
 }
-int nrtries;
-int timeout;
+
 
 int llopen(LinkLayer connectionParameters) {
     int fd = open(connectionParameters.serialPort, O_RDWR | O_NOCTTY);
@@ -171,25 +205,27 @@ int llopen(LinkLayer connectionParameters) {
 int llwrite(int fd, const unsigned char *buf, int bufSize, int sequenceN)
 {
     if(fd = -1){return -1;}
-    unsigned char frame[MAX_PAYLOAD + 6];
+    unsigned char frame[MAX_PAYLOAD + 6], stuffedBuf[MAX_PAYLOAD];
+    int stuffedSize = 0;
     frame[0] = FLAG;
-    frame[1] = A_SENDER
+    frame[1] = A_SENDER;
     frame[2] = sequenceN == 0 ? C_I0 : C_I1;
     frame[3] = frame[1] ^ frame[2];
     unsigned char bcc2 = 0;
-    for(int i = 0; i < bufSize; i++){
-        bcc2 ^= buf[i];
-        frame[4+i] = buf[i];
+    byteStuffing(buf, &bufSize, &stuffedBuf, &stuffedSize);
+    for(int i = 0; i < stuffedSize; i++){
+        bcc2 ^= stuffedBuf[i];
+        frame[4+i] = stuffedBuf[i];
     }
-    frame[4+bufSize] = bcc2;
-    frame[5+bufSize] = FLAG
+    frame[4+stuffedSize] = bcc2;
+    frame[5+stuffedSize] = FLAG;
 
     int attempts = 0;
     State state = START;
 
     while (attempts < nrtries){
         printf("Sending frame...\n");
-        write(fd, frame, bufSize+6);
+        write(fd, frame, stuffedSize+6);
         alarm(timeout);
         unsigned char adress, control, byte;
         while(!alarmFlag && state != STOP){
@@ -200,7 +236,7 @@ int llwrite(int fd, const unsigned char *buf, int bufSize, int sequenceN)
                         if(byte == FLAG) {state = FLAG_RCV};
                         break;
                     case FLAG_RCV:
-                        if(byte == A_RECEIVER) {state = A_RCV; adress = byte};
+                        if(byte == A_RECEIVER) {state = A_RCV; adress = byte;}
                         else state = START; 
                         break;
                     case A_RCV:
@@ -223,7 +259,7 @@ int llwrite(int fd, const unsigned char *buf, int bufSize, int sequenceN)
         if(control == (sequenceN == 0 ? C_RR0 : C_RR1)){
             printf("Frame acknowledged\n");
             sequenceN++;
-            return (bufSize+6);
+            return (stuffedSize+6);
         }else if(control == (sequenceN == 0 ? C_REJ0 : C_REJ1)){
             printf("Frame rejeted\n");
         }
@@ -239,9 +275,10 @@ int llwrite(int fd, const unsigned char *buf, int bufSize, int sequenceN)
 ////////////////////////////////////////////////
 int llread(int fd, unsigned char *packet, int *sequenceN)
 {
-    unsigned char byte, adress, control, bcc2, lastbyte;
+    unsigned char byte, adress, control, bcc2, lastbyte, destuffed[MAX_PAYLOAD];
     State state = START;
     size_t i = 0;
+    int destuffedSize = 0;
     while(state != STOP){
         int bytesRead = read(fd, &byte, 1);
         if(bytesRead > 0){
@@ -268,13 +305,16 @@ int llread(int fd, unsigned char *packet, int *sequenceN)
             }
         }
     }
-    for(size_t j = 0, j<i, j++){
+    byteDeStuffing(packet, &i, &destuffed, &destuffedSize);
+    for(size_t j = 0; j < i ; j++){
         bcc2 ^= packet[j];
     }
+    memcpy(packet, destuffed, destuffedSize);
+
     if (state == STOP && bcc2 == lastbyte){
         unsigned char rrframe[5] = {FLAG, A_RECEIVER, *sequenceN == 0 ? C_RR0 : C_RR1, (A_RECEIVER^(*sequenceN == 0 ? C_RR0 : C_RR1)), FLAG};
         write(fd, rrframe, 5);
-        return ((int)sizeof(*packet));
+        return (destuffedSize);
     }else{
         unsigned char rejframe[5] = {FLAG, A_RECEIVER, *sequenceN == 0 ? C_REJ0 : C_REJ1, (A_RECEIVER^(*sequenceN == 0 ? C_REJ0 : C_REJ1)), FLAG};
         write(fd , rejframe, 5);
@@ -287,6 +327,7 @@ int llread(int fd, unsigned char *packet, int *sequenceN)
 ////////////////////////////////////////////////
 int llclose(int showStatistics)
 {
+    
     // TODO
 
     return 1;
