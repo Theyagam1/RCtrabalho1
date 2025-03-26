@@ -53,15 +53,16 @@ int llwrite(int fd, const unsigned char *buf, int bufSize, int sequenceN);
  * @param sequenceN Ponteiro para o número de sequência esperado (0 ou 1).
  * @return Retorna o número de caracteres lidos ou "-1" em caso de erro.
  */
-int llread(int fd, unsigned char *packet, int *sequenceN);
+int llread(int fd, unsigned char *packet, int sequenceN);
 
 /**
  * Fecha a conexão previamente aberta.
  * 
- * @param showStatistics Se TRUE, imprime estatísticas no console ao fechar.
+ * @param fd Descritor de arquivo da conexão serial.
+ * @param connectionParameters Estrutura contendo os parâmetros da conexão.
  * @return Retorna "1" em caso de sucesso ou "-1" em caso de erro.
  */
-int llclose(int fd, LinkLayer connectionParameters, int showStatistics);
+int llclose(int fd, LinkLayer connectionParameters);
 
 /**
  * Perform byte stuffing on the input data.
@@ -70,7 +71,7 @@ int llclose(int fd, LinkLayer connectionParameters, int showStatistics);
  * @param output Output buffer for stuffed data.
  * @param outputsize Size of the output data.
  */
-void byteStuffing(unsigned char *input, int *inputsize, unsigned char *output, int *outputsize);
+void byteStuffing(const unsigned char *input, int *inputsize, unsigned char *output, int *outputsize);
 
 /**
  * Perform byte destuffing on the input data.
@@ -79,7 +80,7 @@ void byteStuffing(unsigned char *input, int *inputsize, unsigned char *output, i
  * @param output Output buffer for destuffed data.
  * @param outputsize Size of the output data.
  */
-void byteDeStuffing(unsigned char *input, int *inputsize, unsigned char *output, int *outputsize);
+void byteDeStuffing(const unsigned char *input, int *inputsize, unsigned char *output, int *outputsize);
 
 
 #endif // _LINK_LAYER_H_

@@ -38,7 +38,7 @@ int alarmFlag = 0;
 int nrtries;
 int timeout;
 
-void byteStuffing(unsigned char *input, int *inputsize, unsigned char *output, int *outputsize) {
+void byteStuffing(const unsigned char *input, int *inputsize, unsigned char *output, int *outputsize) {
     *outputsize = 0;
     for (int i = 0; i < *inputsize; i++) {
         if (input[i] == FLAG || input[i] == ESC) {
@@ -49,20 +49,22 @@ void byteStuffing(unsigned char *input, int *inputsize, unsigned char *output, i
         }
     }
 }
-void byteDeStuffing(unsigned char *input, int *inputsize, unsigned char *output, int *outputsize) {
+void byteDeStuffing(const unsigned char *input, int *inputsize, unsigned char *output, int *outputsize) {
     *outputsize = 0;
-    for (int i = 0; i < inputsize; i++) {
+    for (int i = 0; i < *inputsize; i++) {
         if (input[i] == ESC) {
+            if (i + 1 >= *inputsize) {
+                // Evita acessar fora dos limites
+                break;
+            }
             i++;
-            if (input[i] == FLAG^STUFF) {
+            if (input[i] == (FLAG ^ STUFF)) {
                 output[(*outputsize)++] = FLAG;
             } 
-            else if (input[i] == ESC^STUFF) {
+            else if (input[i] == (ESC ^ STUFF)) {
                 output[(*outputsize)++] = ESC;
             }
-            output[(*outputsize)++] = input[i];
-        }
-        else {
+        } else {
             output[(*outputsize)++] = input[i];
         }
     }
@@ -108,17 +110,16 @@ int llopen(LinkLayer connectionParameters) {
         unsigned char SET[5] = {FLAG, A_SENDER, C_SET, A_SENDER ^ C_SET, FLAG};
         unsigned char byteread;
         State state = START;
-        int attempts = 0;
-
-        while (attempts < connectionParameters.nRetransmissions) {
+        for (int attempts = 0; attempts < connectionParameters.nRetransmissions; attempts++) {
             printf("Attempt %d\n", attempts);
             write(fd, SET, 5);
             alarm(connectionParameters.timeout);
 
             while (!alarmFlag && state != STOP) {
                 int bytesRead = read(fd, &byteread, 1);
+                printf("byte: %u\n", byteread);
+                printf("state: %d\n", state); 
                 if (bytesRead > 0) {
-                    printf("Byte read: %x\n", byteread);
                     switch (state) {
                         case START:
                             if (byteread == FLAG) state = FLAG_RCV;
@@ -139,34 +140,36 @@ int llopen(LinkLayer connectionParameters) {
                             if (byteread == FLAG) state = STOP;
                             else state = START;
                             break;
+                        case STOP:
+                            break;
                     }
                 }
             }
 
             alarm(0);
-            if (state == STOP) {
+            if (state != STOP) {
+                alarmFlag = 0;
+                state = START;
+            } else {
                 printf("Connection established\n");
                 nrtries = connectionParameters.nRetransmissions;
                 timeout = connectionParameters.timeout;
                 return fd;
-            } else {
-                attempts++;
-                alarmFlag = 0;
-                state = START;
             }
         }
 
         printf("Connection failed\n");
         return -1;
+
     } else if (connectionParameters.role == LlRx) {
-        unsigned char UA[5] = {FLAG, A_SENDER, C_UA, A_SENDER ^ C_UA, FLAG};
+        unsigned char UA[5] = {FLAG, A_RECEIVER, C_UA, A_RECEIVER ^ C_UA, FLAG};
         unsigned char byteread;
         State state = START;
 
         while (state != STOP) {
             int bytesRead = read(fd, &byteread, 1);
+            printf("byte: %u\n", byteread);
             if (bytesRead > 0) {
-                printf("Byte read: %x\n", byteread);
                 switch (state) {
                     case START:
                         if (byteread == FLAG) state = FLAG_RCV;
@@ -187,6 +190,8 @@ int llopen(LinkLayer connectionParameters) {
                         if (byteread == FLAG) state = STOP;
                         else state = START;
                         break;
+                    case STOP:
+                        break;
                 }
             }
         }
@@ -204,15 +209,15 @@ int llopen(LinkLayer connectionParameters) {
 ////////////////////////////////////////////////
 int llwrite(int fd, const unsigned char *buf, int bufSize, int sequenceN)
 {
-    if(fd = -1){return -1;}
-    unsigned char frame[MAX_PAYLOAD + 6], stuffedBuf[MAX_PAYLOAD];
+    if(fd == -1){return -1;}
+    unsigned char frame[MAX_PAYLOAD + 6], stuffedBuf[MAX_PAYLOAD * 2];
     int stuffedSize = 0;
     frame[0] = FLAG;
     frame[1] = A_SENDER;
     frame[2] = sequenceN == 0 ? C_I0 : C_I1;
     frame[3] = frame[1] ^ frame[2];
     unsigned char bcc2 = 0;
-    byteStuffing(buf, &bufSize, &stuffedBuf, &stuffedSize);
+    byteStuffing(buf, &bufSize, stuffedBuf, &stuffedSize);
     for(int i = 0; i < stuffedSize; i++){
         bcc2 ^= stuffedBuf[i];
         frame[4+i] = stuffedBuf[i];
@@ -225,7 +230,8 @@ int llwrite(int fd, const unsigned char *buf, int bufSize, int sequenceN)
 
     while (attempts < nrtries){
         printf("Sending frame...\n");
-        write(fd, frame, stuffedSize+6);
+        int bytesWrote = write(fd, frame, stuffedSize+6);
+        printf("Bytes wrote: %d\n", bytesWrote);
         alarm(timeout);
         unsigned char adress, control, byte;
         while(!alarmFlag && state != STOP){
@@ -233,7 +239,7 @@ int llwrite(int fd, const unsigned char *buf, int bufSize, int sequenceN)
             if(bytesRead > 0){
                 switch(state){
                     case START:
-                        if(byte == FLAG) {state = FLAG_RCV};
+                        if(byte == FLAG) {state = FLAG_RCV;}
                         break;
                     case FLAG_RCV:
                         if(byte == A_RECEIVER) {state = A_RCV; adress = byte;}
@@ -250,6 +256,8 @@ int llwrite(int fd, const unsigned char *buf, int bufSize, int sequenceN)
                     case BCC_OK:
                         if(byte == FLAG){state = STOP;}
                         else state = START;
+                        break;
+                    case STOP:
                         break;
                 }
             }
@@ -273,14 +281,16 @@ int llwrite(int fd, const unsigned char *buf, int bufSize, int sequenceN)
 ////////////////////////////////////////////////
 // LLREAD
 ////////////////////////////////////////////////
-int llread(int fd, unsigned char *packet, int *sequenceN)
+int llread(int fd, unsigned char *packet, int sequenceN)
 {
     unsigned char byte, adress, control, bcc2, lastbyte, destuffed[MAX_PAYLOAD];
     State state = START;
-    size_t i = 0;
+    int i = 0;
     int destuffedSize = 0;
+    printf("Reading frame...\n");
     while(state != STOP){
         int bytesRead = read(fd, &byte, 1);
+        printf("byte: %u\n", byte);
         if(bytesRead > 0){
             switch(state){
                 case START:
@@ -299,33 +309,67 @@ int llread(int fd, unsigned char *packet, int *sequenceN)
                     else state = START;
                     break;
                 case BCC_OK:
-                    if(byte == FLAG){state = STOP; i--;}
-                    else {packet[i] = byte; i++; lastbyte = byte;}
+                    if (byte == FLAG) {
+                        state = STOP;
+                        i--;
+                    } else {
+                        if (i >= MAX_PAYLOAD) {
+                            printf("Error: Packet size exceeded maximum payload size\n");
+                            return -1;
+                        }
+                        packet[i] = byte;
+                        i++;
+                        lastbyte = byte;
+                    }
+                    break;
+                case STOP:
                     break;
             }
         }
+        if(state == STOP){
+            break;
+        }
     }
-    byteDeStuffing(packet, &i, &destuffed, &destuffedSize);
-    for(size_t j = 0; j < i ; j++){
+    alarm(0);
+
+
+    printf("Frame received, dstuffing\n");
+
+    if (i < 0 || i > MAX_PAYLOAD) {
+        printf("Error: Invalid packet size\n");
+        return -1;
+    }
+    byteDeStuffing(packet, &i, destuffed, &destuffedSize);
+
+    for(int j = 0; j < i ; j++){
+
         bcc2 ^= packet[j];
     }
-    memcpy(packet, destuffed, destuffedSize);
+    
+    byteDeStuffing(packet, &i, destuffed, &destuffedSize);
+
+    for(int j = 0; j < destuffedSize; j++){
+        printf("%d", j);
+        packet[j] = destuffed[j];
+    }
+    printf("Destuffed\n");
 
     if (state == STOP && bcc2 == lastbyte){
-        unsigned char rrframe[5] = {FLAG, A_RECEIVER, *sequenceN == 0 ? C_RR0 : C_RR1, (A_RECEIVER^(*sequenceN == 0 ? C_RR0 : C_RR1)), FLAG};
+        unsigned char rrframe[5] = {FLAG, A_RECEIVER, sequenceN == 0 ? C_RR0 : C_RR1, (A_RECEIVER^(sequenceN == 0 ? C_RR0 : C_RR1)), FLAG};
+        printf("Frame acknowledged\n");
         write(fd, rrframe, 5);
         return (destuffedSize);
     }else{
-        unsigned char rejframe[5] = {FLAG, A_RECEIVER, *sequenceN == 0 ? C_REJ0 : C_REJ1, (A_RECEIVER^(*sequenceN == 0 ? C_REJ0 : C_REJ1)), FLAG};
+        unsigned char rejframe[5] = {FLAG, A_RECEIVER, sequenceN == 0 ? C_REJ0 : C_REJ1, (A_RECEIVER^(sequenceN == 0 ? C_REJ0 : C_REJ1)), FLAG};
+        printf("Frame rejeted\n");
         write(fd , rejframe, 5);
     }
     return -1;
 }
-
 ////////////////////////////////////////////////
 // LLCLOSE
 ////////////////////////////////////////////////
-int llclose(int fd, LinkLayer connectionParameters, int showStatistics)
+int llclose(int fd, LinkLayer connectionParameters)
 {
     if(fd == -1){return -1;}
     if(connectionParameters.role == LlTx){
@@ -335,7 +379,8 @@ int llclose(int fd, LinkLayer connectionParameters, int showStatistics)
         int attempts = 0;
         while (attempts < nrtries){
             printf("Sending DISC...\n");
-            write(fd, DISC, 5);
+            int bytesSent = write(fd, DISC, 5);
+            printf("Bytes sent: %d\n", bytesSent);
             alarm(timeout);
             while(!alarmFlag && state != STOP){
                 int bytesRead = read(fd, &byteread, 1);
@@ -359,6 +404,8 @@ int llclose(int fd, LinkLayer connectionParameters, int showStatistics)
                         case BCC_OK:
                             if(byteread == FLAG) {state = STOP;}
                             else state = START;
+                            break;
+                        case STOP:
                             break;
                     }
                 }
@@ -406,13 +453,14 @@ int llclose(int fd, LinkLayer connectionParameters, int showStatistics)
                         if(byteread == FLAG) {state = STOP;}
                         else state = START;
                         break;
+                    case STOP:
+                        break;
                 }
             }
         }
         if(state == STOP){
             printf("DISC received\n");
-            unsigned char UA[5] = {FLAG, A_RECEIVER, C_DISC, A_RECEIVER^C_DISC, FLAG};
-            write(fd, UA, 5);
+            write(fd, DISC, 5);
             close(fd);
             return 1;
         }
